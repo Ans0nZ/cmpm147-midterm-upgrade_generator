@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Roguelike Ability Generator (Prototype)</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; line-height: 1.25; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: end; }
+    label { display:block; font-size: 12px; opacity: .8; margin-bottom: 4px; }
+    select, button, input { padding: 8px 10px; font-size: 14px; }
+    button { cursor: pointer; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; }
+    .title { font-weight: 800; font-size: 16px; margin-bottom: 8px; }
+    .effect { margin: 8px 0; }
+    .trade { color: #b00020; font-weight: 700; }
+    .meta { font-size: 12px; opacity: .75; margin-top: 10px; }
+    .hr { height: 1px; background: #eee; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <h2>Roguelike Ability Generator (Early Prototype)</h2>
+  <div class="row">
+    <div>
+      <label>Risk Level</label>
+      <select id="risk">
+        <option value="low">Low</option>
+        <option value="mid" selected>Medium</option>
+        <option value="high">High</option>
+      </select>
+    </div>
+    <div>
+      <label>Complexity</label>
+      <select id="complexity">
+        <option value="simple">Simple</option>
+        <option value="standard" selected>Standard</option>
+        <option value="complex">Complex</option>
+      </select>
+    </div>
+    <div>
+      <label>Synergy Bias</label>
+      <select id="synergy">
+        <option value="off" selected>Off</option>
+        <option value="on">On</option>
+      </select>
+    </div>
+    <div>
+      <label>Build Tag (for synergy)</label>
+      <select id="buildTag">
+        <option value="lightning" selected>lightning</option>
+        <option value="bleed">bleed</option>
+        <option value="fire">fire</option>
+        <option value="ice">ice</option>
+        <option value="shield">shield</option>
+        <option value="dash">dash</option>
+      </select>
+    </div>
+    <div>
+      <label>How many cards</label>
+      <input id="count" type="number" min="1" max="20" value="3" />
+    </div>
+    <button id="gen">Generate</button>
+    <button id="gen10">Generate x10</button>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+<script>
+const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const chance = (p) => Math.random() < p;
+
+// Pools
+const VERBS = [
+  { id:"strike",   name:"Strike", tags:["attack"], text:(n)=>`Your attacks deal +${n}% damage.` },
+  { id:"projectile", name:"Volley", tags:["attack"], text:(n)=>`Fire ${n} extra projectile(s).` },
+  { id:"shield",   name:"Guard", tags:["shield","defense"], text:(n)=>`Gain a shield equal to ${n}% of max HP.` },
+  { id:"regen",    name:"Regen", tags:["defense"], text:(n)=>`Restore ${n} HP over 3s.` },
+  { id:"dash",     name:"Dash", tags:["dash","mobility"], text:(n)=>`Dash cooldown -${n}%.` },
+];
+
+const MODIFIERS = [
+  { id:"chain", tags:["lightning"], line:(n)=>`${n}% chance to chain to 2 nearby enemies.` },
+  { id:"aoe", tags:["fire"], line:(n)=>`Hits create a small blast for ${n}% damage.` },
+  { id:"bleed", tags:["bleed"], line:(n)=>`Apply Bleed: ${n} damage over 4s.` },
+  { id:"slow", tags:["ice"], line:(n)=>`${n}% chance to Slow enemies for 2s.` },
+  { id:"lifesteal", tags:["bleed"], line:(n)=>`Heal ${n}% of damage dealt.` },
+  { id:"reflect", tags:["shield"], line:(n)=>`While shielded, reflect ${n}% damage.` },
+];
+
+const TRIGGERS = [
+  { id:"on_hit", line:()=>`Trigger: On Hit.` },
+  { id:"on_kill", line:()=>`Trigger: On Kill.` },
+  { id:"on_damage", line:()=>`Trigger: When you take damage.` },
+  { id:"periodic", line:()=>`Trigger: Every 6 seconds.` },
+];
+
+const CONSTRAINTS = {
+  low: [
+    (n)=>`Trade-off: -${n}% move speed.`,
+    (n)=>`Trade-off: +${n}% cooldowns.`,
+    (n)=>`Trade-off: -${n}% max HP.`,
+  ],
+  mid: [
+    (n)=>`Trade-off: -${n}% damage.`,
+    (n)=>`Trade-off: -${n}% max HP.`,
+    (n)=>`Trade-off: +${n}% incoming damage.`,
+    (n)=>`Trade-off: Your dash distance -${n}%.`,
+  ],
+  high: [
+    (n)=>`Trade-off: Taking damage stuns you for 0.4s.`,
+    (n)=>`Trade-off: You take ${n} self-damage on trigger.`,
+    (n)=>`Trade-off: -${n}% damage AND -${Math.max(5, n-5)}% max HP.`,
+    (n)=>`Trade-off: Skills misfire ${Math.min(15,n)}% of the time.`,
+  ]
+};
+
+// Tuning by parameters
+function rangesByRisk(risk){
+  if (risk==="low")  return { verb:[8,18], mod:[15,30], cons:[5,10], trigP:0.35, modCount:[0,1] };
+  if (risk==="mid")  return { verb:[12,28], mod:[20,45], cons:[10,20], trigP:0.55, modCount:[1,1] };
+  return              { verb:[18,40], mod:[30,70], cons:[15,30], trigP:0.75, modCount:[1,2] };
+}
+function rangeInt([a,b]){
+  return Math.floor(a + Math.random()*(b-a+1));
+}
+
+function weightedPick(arr, weightFn){
+  const weights = arr.map(weightFn);
+  const sum = weights.reduce((s,w)=>s+w,0);
+  let r = Math.random()*sum;
+  for (let i=0;i<arr.length;i++){
+    r -= weights[i];
+    if (r<=0) return arr[i];
+  }
+  return arr[arr.length-1];
+}
+
+function generateOne({risk, complexity, synergy, buildTag}){
+  const tune = rangesByRisk(risk);
+
+  // complexity affects number of modifiers/triggers
+  let extraMods = 0;
+  let trigChance = tune.trigP;
+  if (complexity==="simple"){ extraMods = 0; trigChance *= 0.6; }
+  if (complexity==="standard"){ extraMods = 0; }
+  if (complexity==="complex"){ extraMods = 1; trigChance = Math.min(0.9, trigChance+0.15); }
+
+  // choose verb
+  const verbPower = rangeInt(tune.verb);
+  const verb = rand(VERBS);
+
+  // choose modifiers (with optional synergy weighting)
+  const modCountMinMax = tune.modCount;
+  const baseModCount = Math.floor(modCountMinMax[0] + Math.random()*(modCountMinMax[1]-modCountMinMax[0]+1));
+  const modCount = Math.min(2, baseModCount + extraMods);
+
+  const mods = [];
+  for (let i=0;i<modCount;i++){
+    const mod = (synergy==="on")
+      ? weightedPick(MODIFIERS, m => (m.tags.includes(buildTag) ? 3 : 1))
+      : rand(MODIFIERS);
+    // avoid duplicates
+    if (!mods.some(x=>x.id===mod.id)) mods.push(mod);
+  }
+  const modLines = mods.map(m => m.line(rangeInt(tune.mod)));
+
+  // trigger (optional)
+  const trigger = chance(trigChance) ? rand(TRIGGERS).line() : null;
+
+  // constraint severity increases with risk and with “stronger” cards (more mods/triggers)
+  const consBase = rangeInt(tune.cons) + (mods.length*3) + (trigger?3:0);
+  const consLine = rand(CONSTRAINTS[risk])(consBase);
+
+  // name building
+  const nameBits = [];
+  if (mods.some(m=>m.tags.includes("lightning"))) nameBits.push("Spark");
+  if (mods.some(m=>m.tags.includes("bleed"))) nameBits.push("Blood");
+  if (mods.some(m=>m.tags.includes("fire"))) nameBits.push("Ash");
+  if (mods.some(m=>m.tags.includes("ice"))) nameBits.push("Frost");
+  if (verb.tags.includes("shield")) nameBits.push("Aegis");
+  if (verb.tags.includes("dash")) nameBits.push("Stride");
+
+  const title = (nameBits.length ? nameBits.join(" ") : verb.name) + " Protocol";
+
+  const verbLine = verb.text(verbPower);
+
+  const tags = [...new Set([...(verb.tags||[]), ...mods.flatMap(m=>m.tags||[]), buildTag])].slice(0,6);
+
+  return {
+    title,
+    lines: [verbLine, ...modLines, ...(trigger?[trigger]:[])],
+    trade: consLine,
+    meta: `risk=${risk}, complexity=${complexity}, synergy=${synergy}, buildTag=${buildTag}, mods=${mods.map(m=>m.id).join("+") || "none"}`
+  };
+}
+
+function render(cards){
+  const root = document.getElementById("cards");
+  root.innerHTML = "";
+  for (const c of cards){
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = `
+      <div class="title">${c.title}</div>
+      <div class="effect">${c.lines.map(x=>`<div>${x}</div>`).join("")}</div>
+      <div class="hr"></div>
+      <div class="trade">${c.trade}</div>
+      <div class="meta">${c.meta}</div>
+    `;
+    root.appendChild(el);
+  }
+}
+
+function generateMany(n){
+  const risk = document.getElementById("risk").value;
+  const complexity = document.getElementById("complexity").value;
+  const synergy = document.getElementById("synergy").value;
+  const buildTag = document.getElementById("buildTag").value;
+  const out = [];
+  for (let i=0;i<n;i++) out.push(generateOne({risk, complexity, synergy, buildTag}));
+  render(out);
+}
+
+document.getElementById("gen").addEventListener("click", ()=>{
+  const n = Math.max(1, Math.min(20, parseInt(document.getElementById("count").value || "3", 10)));
+  generateMany(n);
+});
+document.getElementById("gen10").addEventListener("click", ()=> generateMany(10));
+
+// auto-generate once so it "runs at least once"
+generateMany(3);
+</script>
+</body>
+</html>
