@@ -1,0 +1,53 @@
+Description (What it does / how it works):
+
+My generator creates roguelike level-up abilities as structured upgrade cards. Each generated ability is assembled from modular components:
+
+Verb (core action, e.g., damage, shield, dash)
+
+Modifier(s) (shape/scale changes, e.g., chain, area, lifesteal)
+
+Trigger (optional timing, e.g., on hit, on kill)
+
+Constraint / Trade-off (a downside required for stronger effects)
+
+The prototype uses weighted random selection plus simple rules:
+
+Higher Risk increases the severity and frequency of trade-offs, and allows stronger modifiers.
+
+Higher Complexity allows more components per ability (e.g., multiple modifiers / triggers).
+
+Synergy Bias optionally favors tags that match an existing “build tag” (e.g., lightning, bleed).
+
+The tool outputs readable upgrade cards that can be repeatedly generated and used as a design space exploration tool for roguelike progression systems.
+
+Intended Parameters (short list)
+
+Risk Level (Low / Medium / High): Controls how strong the upsides can be and how harsh the trade-offs are.
+
+Complexity (Simple / Standard / Complex): Controls number of modifiers/triggers and how “compound” the ability becomes.
+
+Synergy Bias (Off / On): Increases chance of generating abilities matching a chosen build theme tag (e.g., lightning, bleed).
+
+(Optional later) Progress stage / rarity weighting / banned tags.
+
+Risk Review (1–3 risks + next steps)
+
+Balance Risk: Random combinations might create obviously broken or useless abilities.
+
+Next step: introduce a clearer power budget (costs for verbs/modifiers and negative cost for constraints) and clamp numbers by tier.
+
+Readability Risk: Complex abilities could become too wordy or hard to understand quickly.
+
+Next step: enforce a two-line description rule, plus standardized phrasing and tag icons.
+
+Variety Risk: Outputs could feel samey if pools are too small.
+
+Next step: expand component pools and add “signature patterns” (e.g., chain + shock, bleed + execute) and rarity-only effects.
+
+Plan Before Midterm Showcase
+
+Add a simple UI (dropdowns for parameters + “Generate x10” button).
+
+Expand pools (verbs/modifiers/constraints) and implement a basic power-budget pass.
+
+Produce 20+ example outputs with different parameter settings.
